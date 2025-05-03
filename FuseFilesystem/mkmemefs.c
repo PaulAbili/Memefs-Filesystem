@@ -94,7 +94,7 @@ static void fill_superblock(const char *volname)
     gmtime_r(&now, &ts); // Gets the current time in UTC format.
 
     clear_block_buf();                             // Initializes block buffer to zero.
-    memcpy(sb->signature, "?MEMEFS++CMSC421", 16); // Sets filesystem signature.
+    memcpy(sb->signature, "?MEMEFS+CMSC421\0", 16); // Sets filesystem signature.
     sb->fs_version = htonl(1);                     // Sets filesystem version in network byte order.
 
     // Fills BCD-encoded creation time.

@@ -109,10 +109,13 @@ static void *memefs_init(struct fuse_conn_info *conn, struct fuse_config *cfg){
 
 static int memefs_getattr(const char *path, struct stat *stbuf, struct fuse_file_info *fi){
 	(void) fi;
+
 	int result = lstat(path, stbuf);
 	if(result == -1){
+		printf("THIS IS A DISGRACE\n");
 		return -ENOENT;
 	}
+
 	return 0;
 }
 
@@ -121,92 +124,131 @@ static int memefs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, o
 	(void) fi;
 	(void) flags;
 
-	if (strcmp(path, "/") != 0)
+	if (strcmp(path, "/") != 0){
 		return -ENOENT;
+	}
 
 	filler(buf, ".", NULL, 0, 0);
 	filler(buf, "..", NULL, 0, 0);
-	filler(buf, "sample.txt", NULL, 0, FUSE_FILL_DIR_PLUS);
-
+	for(int i = 0; i < 224; i++){
+		if(strcmp(directory_blocks[i].filename, " ") != 0){
+			filler(buf, directory_blocks[i].filename, NULL, 0, FUSE_FILL_DIR_PLUS);
+		}
+	}
 	return 0;
 }
 
 static int memefs_create(const char *path, mode_t mode, struct fuse_file_info *fi){
-	(void) mode;
-	int index = -1;
-	for(int i = 0; i < 224; i++){
-		if(directory_blocks[i].type != 0){
+	printf("Starting out\n");
+	int index = 224;
+	for(int i = 223; i >= 0; i--){
+		if(directory_blocks[i].type == 0){
 			index = i;
-			i = 224;
+			i = -1;
 		}
 	}
-	if(index == -1){
+	printf("1: \n");
+	if(index == 224){
 		printf("There is no space\n");
 		return 0; // ignore
-
 	}
+        printf("2: \n");
+
 	char full[12];
-	char name[8] = "\0\0\0\0\0\0\0\0";
-	char ext[4] = "\0\0\0\0";
-	if(strlen(path) > 12){ //size + 1 for .
-		return 0; //ignore
-	}
-	char* token = strtok((char *) path, ".");
-	if(strlen(token) > 8){
-		return 0; //ignore
-	}
-	strcpy(name, token);
-	token = strtok((char *)path, ".");
-	if(strlen(token) > 3){
-		return 0; //ignore
-	}
-	strcpy(ext, token);
-	strcat(full, name);
-	strcat(full, ext);
+        char name[9];
+        char ext[3];
+        const char delimiter[2] = ".";
+        char* token;
 
-	for(int i = 0; i < 11; i++){
+        if(strlen(path) > 12){ //size + 1 for .
+                return 0; //ignore
+        }
+
+        token = strtok((char*) path, delimiter);
+        int counter = 0;
+        while(token != NULL){
+                if(counter == 0){
+                        if(!(strlen(token) > 9)){
+                                strncpy(name, token, strlen(token));
+                        } else {
+                                return 0;
+                        }
+                }
+
+                if(counter == 1){
+                        if(!(strlen(token) > 3)){
+                                strncpy(ext, token, strlen(token));
+                        } else {
+                                return 0;
+                        }
+                }
+                if(counter == 2){
+                    return 0;
+                }
+                token = strtok(NULL, delimiter);
+                counter++;
+        }
+    	for(int i = 0; i < 9; i++){
+        	if((size_t)i >= strlen(name)){
+        	    full[i] = '\0';
+        	} else {
+        	    full[i] = name[i];
+        	}
+    	}
+    	for(int i = 0; i < 3; i++){
+        	if((size_t)i >= strlen(ext)){
+            		full[i + 9] = '\0';
+        	} else {
+        	    	full[i + 9] = ext[i];
+        	}
+    	}
+
+	for(int i = 0; i < 12; i++){
+		printf("%d:%c ", i, full[i]);
+	}
+
+	for(int i = 1; i < 12; i++){
 		if(!((full[i] >= 65 && full[i] <= 90) || (full[i] >= 97 && full[i] <= 122)  ||
 		     	(full[i] >= 48 && full[i] <= 57) || (full[i] == 94) || (full[i] == 95) ||
-		     	(full[i] == 45) || (full[i] == 61) || (full[i] == 124) || (full[i] == 0))){
+		     	(full[i] == 45) || (full[i] == 61) || (full[i] == 124) || (full[i] == 0 || full[i] == 1))){
 			return 0; //ignore
 		}
 	}
 
+	printf("Midwest\n");
 	for(int i = 0; i < 224; i++){
-		if(strcmp(full, directory_blocks[i].filename) == 0){
+		if(strcmp(path + 1, directory_blocks[i].filename) == 0){
 			return 0; //duplicate
 		}
 	}
-	int result;
-        result = open(path, fi->flags, mode);
+	printf("3: \n");
+	int result = open(path, fi->flags, mode);
         if(result == -1){
+		printf("This FAILED\n");
                 return -1;
         }
         fi->fh = result;
 
-	struct stat info;
-	stat(path, &info);
+	printf("4: \n");
 	uint8_t timestamp[8];
 	generate_memefs_timestamp(timestamp);
 
-	directory_blocks[index].type = info.st_mode;
-	directory_blocks[index].start_block = (index + 1) * BLOCK_SIZE;
-	strcpy(directory_blocks[index].filename, full);
+	directory_blocks[index].type = mode;
+	directory_blocks[index].start_block = (index + 15);
+	memcpy(directory_blocks[index].filename, full + 1, 11);
 	directory_blocks[index].unused = 0;
 	directory_blocks[index].size = 512;
-	directory_blocks[index].ownerUID = info.st_uid;
-	directory_blocks[index].groupGID = info.st_gid;
+	directory_blocks[index].ownerUID = getuid();
+	directory_blocks[index].groupGID = getgid();
 
 	for(int i = 0; i < 8; i++){
 		directory_blocks[index].timestamp[i] = timestamp[i];
 	}
-	for(int i = 19; i < 239; i++){
-		if(main_FAT[i] != 0){
-			main_FAT[i] = 0xFFFF;
-			backup_FAT[i] = 0xFFFF;
-		}
-	}
- 
+
+	main_FAT[index + 15] = 0xFFFF;
+	backup_FAT[index + 15] = 0xFFFF;
+
+	printf("getting to it\n");
 	return 0;
 }
 
@@ -221,6 +263,16 @@ static int memefs_unlink(const char *path){
 	if(index == -1){
 		printf("Couldn't locate %s\n", path);
 	}
+	directory_blocks[index].type = 0;
+	strcpy(directory_blocks[index].filename, " ");
+	int nextFAT = directory_blocks[index].start_block;
+	int current = nextFAT;
+	do {
+		current = nextFAT;
+		nextFAT = main_FAT[current];
+		main_FAT[current] = 0;
+		backup_FAT[current] = 0;
+	} while(current != 0xFFFF);
 
 	return 0;
 }

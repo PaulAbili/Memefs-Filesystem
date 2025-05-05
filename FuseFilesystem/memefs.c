@@ -215,7 +215,7 @@ static int memefs_create(const char *path, mode_t mode, struct fuse_file_info *f
 		}
 	}
 
-	printf("Midwest\n");
+	printf("Middle\n");
 	for(int i = 0; i < 224; i++){
 		if(strcmp(path + 1, directory_blocks[i].filename) == 0){
 			return 0; //duplicate

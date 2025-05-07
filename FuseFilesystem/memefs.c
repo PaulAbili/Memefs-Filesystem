@@ -126,7 +126,7 @@ static int memefs_getattr(const char *path, struct stat *stbuf, struct fuse_file
 	}
 
 
-	for(int i = 0; i < 244; i++){
+	for(int i = 0; i < 224; i++){
 		if(directory_blocks[i].type != 0 && strcmp(directory_blocks[i].filename, full + 1) == 0){
 			stbuf->st_mode = directory_blocks[i].type;
 			stbuf->st_nlink = 1;
@@ -156,8 +156,9 @@ static int memefs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, o
 
 	for(int i = 0; i < 224; i++){
 		if(directory_blocks[i].type != 0 && directory_blocks[i].filename[0] != '\0' && strcmp(directory_blocks[i].filename, " ") != 0){
-	                reverse_conversion(directory_blocks[i].filename, original);
-			filler(buf, original, NULL, 0, FUSE_FILL_DIR_PLUS);
+	                memset(original, '\0', 13);
+			reverse_conversion(directory_blocks[i].filename, original);
+			filler(buf, original + 1, NULL, 0, 0);
 		}
 	}
 	return 0;
@@ -166,6 +167,7 @@ static int memefs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, o
 static int memefs_create(const char *path, mode_t mode, struct fuse_file_info *fi){
 	printf("Starting out\n");
 	int index = 224;
+
 	for(int i = 223; i >= 0; i--){
 		if(directory_blocks[i].type == 0){
 			index = i;
@@ -178,7 +180,7 @@ static int memefs_create(const char *path, mode_t mode, struct fuse_file_info *f
 		return -ENFILE; // ignore
 	}
         printf("2: \n");
-        if(strlen(path) > 13){ //size + 1 for .
+        if(strlen(path) > 13){ //size + 1 for . and + 1 for /
                 return -ENAMETOOLONG; //ignore
         }
 
@@ -199,7 +201,7 @@ static int memefs_create(const char *path, mode_t mode, struct fuse_file_info *f
 		if(!((full[i] >= 65 && full[i] <= 90) || (full[i] >= 97 && full[i] <= 122)  ||
 		     	(full[i] >= 48 && full[i] <= 57) || (full[i] == 94) || (full[i] == 95) ||
 		     	(full[i] == 45) || (full[i] == 61) || (full[i] == 124) || (full[i] == '\0' || full[i] == 1 || full[i] == 6))){
-			printf("This Character is invalid:%c or %d it was found at index: %d\n", full[i], full[i], i);
+			printf("This Character is invalid:%c or %d was found at index: %d\n", full[i], full[i], i);
 			return -EBADF; //ignore
 		}
 	}
@@ -214,8 +216,8 @@ static int memefs_create(const char *path, mode_t mode, struct fuse_file_info *f
 	uint8_t timestamp[8];
 	generate_memefs_timestamp(timestamp);
 
-	directory_blocks[index].type = mode;
-	directory_blocks[index].start_block = (index + 15);
+	directory_blocks[index].type = S_IFREG | (mode & 0777);
+	directory_blocks[index].start_block = 242 - index;
 	memcpy(directory_blocks[index].filename, full + 1, 11);
 	directory_blocks[index].unused = 0;
 	directory_blocks[index].size = 512;
@@ -226,36 +228,13 @@ static int memefs_create(const char *path, mode_t mode, struct fuse_file_info *f
 		directory_blocks[index].timestamp[i] = timestamp[i];
 	}
 
-	main_FAT[index + 15] = 0xFFFF;
-	backup_FAT[index + 15] = 0xFFFF;
+	main_FAT[242 - index] = 0xFFFF;
+	backup_FAT[242 - index] = 0xFFFF;
 	fi->fh = index;
 
 	printf("getting to it: \n");
 	return 0;
 }
-
-static int memefs_utimens(const char *path, const struct timespec tv[2], struct fuse_file_info *fi){
-	(void) fi;
-	(void) tv;
-
-        char full[13];
-        memset(full, 0, 13);
-
-        int result = convert_filename(full, path);
-
-	if(result != 0){
-		return -ENOENT;
-	}
-
-	for(int i = 0; i < 224; i++){
-		if(directory_blocks[i].type != 0 && strcmp(directory_blocks[i].filename, full + 1) == 0){
-			generate_memefs_timestamp(directory_blocks[i].timestamp);
-			return 0;
-		}
-	}
-	return -ENOENT;
-}
-
 
 static int memefs_unlink(const char *path){
 	int index = -1;
@@ -311,62 +290,134 @@ static int memefs_open(const char *path, struct fuse_file_info *fi){
 }
 
 static int memefs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi){
-    (void) fi;
-    char full[13];
-    memset(full, 0, 13);
-
-    if (convert_filename(full, path) != 0) {
-        return -ENOENT;
-    }
-
-    int index = -1;
-    for (int i = 0; i < 224; i++) {
-        if (directory_blocks[i].type != 0 && strcmp(directory_blocks[i].filename, full + 1) == 0) {
-            index = i;
-            break;
-        }
-    }
-
-    if (index == -1) {
-        return -ENOENT;
-    }
-
-	int read_bytes = 0;
-	for(int i = 0; (size_t) i < size; i++){
-		buf[i] = user_blocks[i];
-		read_bytes++;
-	}
-
-	return read_bytes;
-}
-
-static int memefs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi){
+	(void) size;
+	(void) offset;
+	(void) fi;
 	char full[13];
 	memset(full, 0, 13);
 
-	if (convert_filename(full, path) != 0) {
-        	return -ENOENT;
+    	if (convert_filename(full, path) != 0) {
+    	    return -ENOENT;
     	}
 
     	int index = -1;
     	for (int i = 0; i < 224; i++) {
     	    if (directory_blocks[i].type != 0 && strcmp(directory_blocks[i].filename, full + 1) == 0) {
     	        index = i;
-    	        break;
+    	        i = 224;
     	    }
     	}
 
-    	if (index == -1) {
-    	    return -ENOENT;
-    	}
-
-	int write_bytes = 0;
-	for(int i = 0; (size_t) i < size; i++){
-		user_blocks[i] = buf[i];
-		write_bytes++;
+	if (index == -1) {
+		return -ENOENT;
 	}
 
-	return write_bytes;
+	int read_bytes = 0;
+	int total = 0;
+	int FAT_loc = directory_blocks[index].start_block;
+
+	while(main_FAT[FAT_loc] != 0xFFFF){
+		buf[total++] = user_blocks[((FAT_loc - 19) * BLOCK_SIZE) + read_bytes++];
+		if(read_bytes == BLOCK_SIZE - 1){
+			FAT_loc = main_FAT[FAT_loc];
+			read_bytes = 0;
+		}
+	}
+
+	while(user_blocks[((FAT_loc - 19) * BLOCK_SIZE) + read_bytes] != 0){
+		buf[total++] = user_blocks[((FAT_loc - 19) * BLOCK_SIZE) + read_bytes++];
+	}
+
+	printf("Read from buffer total: %d\n", total);
+	for(int i = 0; i < total; i++){
+		printf("%c", buf[i]);
+	}
+	printf("\n");
+	printf("Attempted Access Location\n");
+	for(int i = 0; i < 4; i++){
+		printf("%c", user_blocks[((FAT_loc - 19) * BLOCK_SIZE) + i]);
+	}
+	printf("\n");
+	return total;
+}
+
+static int memefs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi){
+	(void) offset;
+	(void) fi;
+	char full[13];
+	memset(full, 0, 13);
+
+	printf("This is the START\n");
+	if (convert_filename(full, path) != 0) {
+        	printf("Error 1\n");
+		return -ENOENT;
+    	}
+
+    	int index = -1;
+    	for (int i = 0; i < 224; i++) {
+    	    if (directory_blocks[i].type != 0 && strcmp(directory_blocks[i].filename, full + 1) == 0) {
+    	        index = i;
+    	       	i = 224;
+    	    }
+    	}
+
+	if (index == -1) {
+		printf("Error 2\n");
+    		return -ENOENT;
+    	}
+
+        int FAT_loc = directory_blocks[index].start_block;
+
+	printf("FAT_loc %d\n", FAT_loc);
+	while(main_FAT[FAT_loc] != 0xFFFF){
+        	FAT_loc = main_FAT[FAT_loc];
+        }
+	printf("FAT_loc %d\n", FAT_loc);
+	int count = 0;
+        int write_count = 0;
+	while(user_blocks[((FAT_loc - 19) * BLOCK_SIZE) + count] != 0){
+        	count++;
+	}
+
+	printf("THIS IS JUST THE START\n");
+	index = 224;
+	int req;
+	int prev;
+	int start = FAT_loc;
+	if((size_t) count + size > BLOCK_SIZE - 1){
+		req = size / BLOCK_SIZE;
+		for(int i = 223; i >= 0 && req > 0; i--){
+                	if(directory_blocks[i].type == 0){
+                	        prev = FAT_loc;
+				FAT_loc = directory_blocks[i].start_block;
+                	        main_FAT[prev] = FAT_loc;
+				main_FAT[FAT_loc] = 0xFFFF;
+                		req--;
+			}
+        	}
+        	if(req > 0){
+                	printf("There is no space\n");
+                	return -ENFILE; // ignore
+        	}
+	}
+	FAT_loc = start;
+	while((size_t)write_count < size){
+		user_blocks[((FAT_loc - 19) * BLOCK_SIZE) + count++] = buf[write_count++];
+	        if((size_t) count + size > BLOCK_SIZE - 1 && FAT_loc == start){
+			FAT_loc = main_FAT[FAT_loc];
+			count = 0;
+		} else if(count == BLOCK_SIZE -1){
+			FAT_loc = main_FAT[FAT_loc];
+			count = 0;
+		}
+	}
+	printf("Written to buffer\n");
+	for(int i = 0; i < write_count; i++){
+		printf("%c", buf[i]);
+	}
+
+	printf("\n");
+	return write_count;
 }
 
 static int memefs_truncate(const char *path, off_t size, struct fuse_file_info *fi){
@@ -375,6 +426,30 @@ static int memefs_truncate(const char *path, off_t size, struct fuse_file_info *
 	(void) fi;
 	return 0;
 }
+
+
+static int memefs_utimens(const char *path, const struct timespec tv[2], struct fuse_file_info *fi){
+        (void) fi;
+        (void) tv;
+
+        char full[13];
+        memset(full, 0, 13);
+
+        int result = convert_filename(full, path);
+
+        if(result != 0){
+                return -ENOENT;
+        }
+
+        for(int i = 0; i < 224; i++){
+                if(directory_blocks[i].type != 0 && strcmp(directory_blocks[i].filename, full + 1) == 0){
+                        generate_memefs_timestamp(directory_blocks[i].timestamp);
+                        return 0;
+                }
+        }
+        return -ENOENT;
+}
+
 /**
  * Copies signature information from image if version is 1, intializes variables
  */
@@ -751,12 +826,12 @@ static const struct fuse_operations memefs_oper = {
 	.getattr	= memefs_getattr,
 	.readdir	= memefs_readdir,
 	.create		= memefs_create,
-	.utimens	= memefs_utimens,
 	.unlink		= memefs_unlink,
 	.open		= memefs_open,
 	.read		= memefs_read,
 	.write		= memefs_write,
 	.truncate	= memefs_truncate,
+        .utimens        = memefs_utimens,
 };
 
 int main(int argc, char *argv[]){

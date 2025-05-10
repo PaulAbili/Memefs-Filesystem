@@ -96,37 +96,20 @@ static int memefs_getattr(const char *path, struct stat *stbuf, struct fuse_file
 		return 0;
 	}
 
-	char full[13];
-	memset(full, '\0', 13);
-	int result = convert_filename(full, path);
-	if(result != 0){
-        	printf("Couldn't convert file name\n");
-		return -ENOENT;
-	}
-
 	char original[14];
+
 	for(int i = 0; i < 224; i++){
-		if(directory_blocks[i].type != 0 && strcmp(directory_blocks[i].filename, full + 1) == 0){
-			memset(original, '\0', 14);
-			reverse_conversion(full + 1, original);
-
-			printf("Original: ");
-			for(int j = 0; j < strlen(original); j++){
-				printf("Index: %d, %c\n", j, original[j]);
-			}
-
-			printf("\n");
-			if(strcmp(original, path + 1) == 0){
-				stbuf->st_mode = directory_blocks[i].type;
-				stbuf->st_nlink = 1;
-				stbuf->st_size = directory_blocks[i].size;
-				stbuf->st_uid = directory_blocks[i].ownerUID;
-				stbuf->st_gid = directory_blocks[i].groupGID;
-				return 0;
-			}
+		memset(original, '\0', 14);
+        	reverse_conversion(directory_blocks[i].filename, original);
+		if(strcmp(original, path + 1) == 0){
+			stbuf->st_mode = directory_blocks[i].type;
+			stbuf->st_nlink = 1;
+			stbuf->st_size = directory_blocks[i].size;
+			stbuf->st_uid = directory_blocks[i].ownerUID;
+			stbuf->st_gid = directory_blocks[i].groupGID;
+			return 0;
 		}
 	}
-
 	printf("Cannot locate file\n");
 	return -ENOENT;
 }
@@ -135,6 +118,7 @@ static int memefs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, o
 	(void) offset;
 	(void) fi;
 	(void) flags;
+	memset(buf, 0, sizeof(*buf));
 	if(strcmp(path, "/") != 0){
 		return -ENOENT;
 	}
@@ -147,6 +131,7 @@ static int memefs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, o
 		if(directory_blocks[i].type != 0 && directory_blocks[i].filename[0] != '\0' && strcmp(directory_blocks[i].filename, " ") != 0){
 			memset(original, '\0', 14);
 			reverse_conversion(directory_blocks[i].filename, original);
+
 			filler(buf, original, NULL, 0, 0);
 		}
 	}
@@ -193,8 +178,11 @@ static int memefs_create(const char *path, mode_t mode, struct fuse_file_info *f
 		}
 	}
 
+        char original[14];
 	for(int i = 0; i < 224; i++){
-		if(strcmp(path + 1, directory_blocks[i].filename) == 0){
+		memset(original, '\0', 14);
+        	reverse_conversion(directory_blocks[i].filename, original);
+		if(strcmp(original, path + 1) == 0){
 			printf("This file already exists\n");
 			return -EEXIST; //duplicate
 		}
@@ -233,9 +221,13 @@ static int memefs_unlink(const char *path){
 		return 0;
 	}
 
+	char original[14];
+
 	for(int i = 0; i < 16 * 14; i++){
-		if(strcmp(directory_blocks[i].filename, full + 1) == 0){
-			index = i;
+                memset(original, '\0', 14);
+                reverse_conversion(directory_blocks[i].filename, original);
+		if(strcmp(original, path + 1) == 0){
+                        index = i;
 		}
 	}
 
@@ -257,20 +249,14 @@ static int memefs_unlink(const char *path){
 }
 
 static int memefs_open(const char *path, struct fuse_file_info *fi){
-	char full[13];
-	memset(full, '\0', 13);
-
-	int result = convert_filename(full, path);
-
-	if(result != 0){
-        	printf("Couldn't convert file name\n");
-        	return -ENOENT;
-    	}
-
+	char original[14];
     	for(int i = 0; i < 224; i++){
-        	if(directory_blocks[i].type != 0 && strcmp(directory_blocks[i].filename, full + 1) == 0){
-            		fi->fh = i;
-           		 return 0;
+		memset(original, '\0', 14);
+                reverse_conversion(directory_blocks[i].filename, original);
+
+        	if(directory_blocks[i].type != 0 && strcmp(original, path + 1) == 0){
+			fi->fh = i;
+           		return 0;
         	}
     	}
 
@@ -282,20 +268,15 @@ static int memefs_read(const char *path, char *buf, size_t size, off_t offset, s
 	(void) size;
 	(void) offset;
 	(void) fi;
-	char full[13];
-        memset(full, '\0', 13);
-
-	int result = convert_filename(full, path);
-    	if(result != 0){
-		printf("Couldn't convert file name\n");
-    		return -ENOENT;
-    	}
 
     	int index = -1;
+	char original[14];
     	for(int i = 0; i < 224; i++){
-    		if(directory_blocks[i].type != 0 && strcmp(directory_blocks[i].filename, full + 1) == 0){
-    			index = i;
-    		        i = 224;
+                memset(original, '\0', 14);
+                reverse_conversion(directory_blocks[i].filename, original);
+    		if(directory_blocks[i].type != 0 && strcmp(original, path + 1) == 0){
+			index = i;
+    		       	i = 224;
     		}
     	}
 
@@ -326,19 +307,14 @@ static int memefs_read(const char *path, char *buf, size_t size, off_t offset, s
 static int memefs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi){
 	(void) offset;
 	(void) fi;
-	char full[13];
-        memset(full, '\0', 13);
-
-	int result = convert_filename(full, path);
-	if(result != 0){
-        	printf("Couldn't convert file name\n");
-		return -ENOENT;
-    	}
 
     	int index = -1;
+	char original[14];
     	for(int i = 0; i < 224; i++){
-    		if(directory_blocks[i].type != 0 && strcmp(directory_blocks[i].filename, full + 1) == 0){
-    	        	index = i;
+		memset(original, '\0', 14);
+                reverse_conversion(directory_blocks[i].filename, original);
+    		if(directory_blocks[i].type != 0 && strcmp(original, path + 1) == 0){
+			index = i;
     	       		i = 224;
     	    	}
     	}
@@ -412,20 +388,14 @@ static int memefs_utimens(const char *path, const struct timespec tv[2], struct 
         (void) fi;
         (void) tv;
 
-        char full[13];
-        memset(full, '\0', 13);
-
-        int result = convert_filename(full, path);
-
-        if(result != 0){
-                return -ENOENT;
-        }
-
+	char original[14];
         for(int i = 0; i < 224; i++){
-                if(directory_blocks[i].type != 0 && strcmp(directory_blocks[i].filename, full + 1) == 0){
-                        generate_memefs_timestamp(directory_blocks[i].timestamp);
-                        return 0;
-                }
+		memset(original, '\0', 14);
+                reverse_conversion(directory_blocks[i].filename, original);
+                if(directory_blocks[i].type != 0 && strcmp(original, path + 1) == 0){
+			generate_memefs_timestamp(directory_blocks[i].timestamp);
+                       	return 0;
+		}
         }
         return -ENOENT;
 }
@@ -739,8 +709,8 @@ static int convert_filename(char* full, const char* path){
                 	if(i != 9){
           	        	full[i] = '\0';
                     	}
-                    full[i + difference] = path[i + 1];
-                    postPeriod++;
+                	full[i + difference] = path[i + 1];
+                 	postPeriod++;
                 }
         }
 	full[12] = '\0';

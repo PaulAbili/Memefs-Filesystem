@@ -151,12 +151,12 @@ static int memefs_create(const char *path, mode_t mode, struct fuse_file_info *f
 
 	if(index == 224){
 		printf("There is no space\n");
-		return -ENFILE; // ignore
+		return -ENOSPC; // ignore
 	}
 
         if(strlen(path) > 13){ //size + 1 for . and + 1 for /
         	printf("File Name or Extension is too long\n");
-		return -ENAMETOOLONG; //ignore
+		return 0; //ignore
         }
 
 	char full[13];
@@ -305,7 +305,7 @@ static int memefs_read(const char *path, char *buf, size_t size, off_t offset, s
 }
 
 static int memefs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi){
-	(void) offset;
+		(void) offset;
 	(void) fi;
 
     	int index = -1;
@@ -380,7 +380,7 @@ static int memefs_truncate(const char *path, off_t size, struct fuse_file_info *
 	(void) path;
 	(void) size;
 	(void) fi;
-	return 0;
+	return 0; // truncating is implemented within write
 }
 
 

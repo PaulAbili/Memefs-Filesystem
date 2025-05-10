@@ -539,7 +539,7 @@ static int mount_memefs(){
 }
 
 static int unmount_memefs(){
-	FILE* filesystem = fopen("myfilesystem.img", "w+");
+	FILE* filesystem = fopen("myfilesystem.img", "r+");
 	int file_des = fileno(filesystem);
 	//Superblock
 	int i = 0;

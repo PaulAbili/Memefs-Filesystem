@@ -23,6 +23,7 @@
 #define BLOCK_SIZE 512
 
 #include <fuse3/fuse.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <stddef.h>
 #include <unistd.h>
@@ -86,6 +87,7 @@ uint16_t backup_FAT[256];
 memefs_directory_t directory_blocks[16 * 14];
 uint8_t reserved_blocks[18 * BLOCK_SIZE];
 uint8_t user_blocks[220 * BLOCK_SIZE];
+char* abs_path;
 
 static int memefs_getattr(const char *path, struct stat *stbuf, struct fuse_file_info *fi){
 	(void) fi;
@@ -188,11 +190,18 @@ static int memefs_create(const char *path, mode_t mode, struct fuse_file_info *f
 		}
 	}
 
+	int startBlock = 242 - index;
 	uint8_t timestamp[8];
 	generate_memefs_timestamp(timestamp);
 
 	directory_blocks[index].type = S_IFREG | (mode & 0777);
-	directory_blocks[index].start_block = 242 - index;
+	while(main_FAT[startBlock] != 0){
+		if(startBlock > 255){
+			return -ENOSPC;
+		}
+		startBlock++;
+	}
+	directory_blocks[index].start_block = startBlock;
 	memcpy(directory_blocks[index].filename, full + 1, 11);
 	directory_blocks[index].unused = 0;
 	directory_blocks[index].size = 0;
@@ -203,10 +212,11 @@ static int memefs_create(const char *path, mode_t mode, struct fuse_file_info *f
 		directory_blocks[index].timestamp[i] = timestamp[i];
 	}
 
-	main_FAT[242 - index] = 0xFFFF;
-	backup_FAT[242 - index] = 0xFFFF;
+	main_FAT[startBlock] = 0xFFFF;
+	backup_FAT[startBlock] = 0xFFFF;
 	fi->fh = index;
 
+	printf("End of create\n");
 	return 0;
 }
 
@@ -233,7 +243,7 @@ static int memefs_unlink(const char *path){
 
 	if(index == -1){
 		printf("Couldn't locate %s\n", path);
-		-ENONET;
+		return -ENONET;
 	}
 	directory_blocks[index].type = 0;
 	strcpy(directory_blocks[index].filename, " ");
@@ -372,7 +382,9 @@ static int memefs_write(const char *path, const char *buf, size_t size, off_t of
 	}
 	FAT_loc = start;
 
+	printf("After linking\n");
 	while((size_t)write_count < size){
+		printf("FAT_loc: %d  index: %d\n", FAT_loc, index);
 		user_blocks[((FAT_loc - 19) * BLOCK_SIZE) + count++] = buf[write_count++];
 		directory_blocks[index].size++;
 		if(count > BLOCK_SIZE){
@@ -385,6 +397,7 @@ static int memefs_write(const char *path, const char *buf, size_t size, off_t of
 		backup_FAT[i] = main_FAT[i];
 	}
 
+	printf("End of write\n");
 	return write_count;
 }
 
@@ -416,7 +429,10 @@ static int memefs_utimens(const char *path, const struct timespec tv[2], struct 
  * Copies signature information from image if version is 1, intializes variables
  */
 static int mount_memefs(){
-	FILE* filesystem = fopen("myfilesystem.img", "rb");
+	char pathInfo[]  = "myfilesystem.img";
+       	abs_path = realpath(pathInfo, NULL);
+
+	FILE* filesystem = fopen(abs_path, "rb");
 
 	if(filesystem == NULL){
 		perror("Mount memefs fopen\n");
@@ -431,15 +447,18 @@ static int mount_memefs(){
 	main_superblock.cleanly_unmounted = 0xFF;
 	i++;
         //reserved bytes
+	for(int j = 0; j < 3; j++){
+		main_superblock.reserved_bytes[j] = 0;
+	}
 	i+=3;
 	pread(file_des, &big_temp, 4, (255 * BLOCK_SIZE) + i);
     	main_superblock.fs_version = ntohl(big_temp);
 	i+=4;
 	for(int j = 0; j < 8; j++){
-        	pread(file_des, &temp, 1, (255 * BLOCK_SIZE) + i + j);
+        	pread(file_des, &temp, 1, (255 * BLOCK_SIZE) + i);
        		main_superblock.fs_ctime[j] = temp;
+		i++;
 	}
-	i+=8;
         pread(file_des, &temp, 2, (255 * BLOCK_SIZE) + i);
         main_superblock.main_fat = ntohs(temp);
 	i+=2;
@@ -467,6 +486,9 @@ static int mount_memefs(){
         pread(file_des, &main_superblock.volume_label, 16, (255 * BLOCK_SIZE) + i); //string
 	i+=16;
       	//unused bytes
+	for(int j = 0; j < 448; j++){
+		main_superblock.unused[j] = 0;
+	}
 	backup_superblock = main_superblock;
 	i = 0;
 	//FAT
@@ -519,11 +541,11 @@ static int mount_memefs(){
 			i+=2;
                         pread(file_des, &directory_blocks[j].filename, 11, (240 * BLOCK_SIZE) + i);
 			i+=11;
-                        //unused
+                        directory_blocks[j].unused = 0;//unused
 			i++;
-			for(int j = 0; j < 8; j++){
+			for(int k = 0; k < 8; k++){
                         	pread(file_des, &temp, 1, (240 * BLOCK_SIZE) + i);
-                		directory_blocks[j].timestamp[j] = temp;
+                		directory_blocks[j].timestamp[k] = temp;
 				i++;
 			}
                         pread(file_des, &big_temp, 4, (240 * BLOCK_SIZE) + i);
@@ -534,22 +556,22 @@ static int mount_memefs(){
 			i+=2;
                         pread(file_des, &temp, 2, (240 * BLOCK_SIZE) + i);
                 	directory_blocks[j].groupGID = ntohs(temp);
+			i+=2;
 		}
 		//User Blocks
 		i = 0;
 		for(int j = 0; j < 220 * BLOCK_SIZE; j++){
 			pread(file_des, &temp, 1, (19 * BLOCK_SIZE) + i);
-			user_blocks[j] = ntohs(temp);
+			user_blocks[j] = temp;
 			i++;
 		}
 	}
-
 	fclose(filesystem);
 	return 0;
 }
 
 static int unmount_memefs(){
-   	FILE* filesystem = fopen("/usr/src/project4/project4-SmilingSupernova/FuseFilesystem/myfilesystem.img", "wb+");
+   	FILE* filesystem = fopen(abs_path, "rb+");
 	if(filesystem == NULL){
                 perror("Unmount memefs fopen\n");
 		return -ENONET;
@@ -566,18 +588,22 @@ static int unmount_memefs(){
 
 	pwrite(file_des, &main_superblock.signature, 16, (255 * BLOCK_SIZE) + i); //signature
 	i+=16;
-	temp = htons(main_superblock.cleanly_unmounted);
+	temp = main_superblock.cleanly_unmounted;
         pwrite(file_des, &temp, 1, (255 * BLOCK_SIZE) + i); //mounted flag
 	i++;
-	i+=3; //reserved
+	for(int j = 0; j < 3; j++){
+		temp = main_superblock.reserved_bytes[j];
+		pwrite(file_des, &temp, 1, (255 * BLOCK_SIZE) + i);
+		i++;
+	}
 	big_temp = htonl(main_superblock.fs_version + 1);
 	pwrite(file_des, &big_temp, 4, (255 * BLOCK_SIZE) + i); //version
 	i+=4;
 	for(int j = 0; j < 8; j++){
 		temp = main_superblock.fs_ctime[j];
-        	pwrite(file_des, &temp, 1, (255 * BLOCK_SIZE) + i + j);//BCD
+        	pwrite(file_des, &temp, 1, (255 * BLOCK_SIZE) + i);//BCD
+		i++;
 	}
-	i+=8;
 	temp = htons(main_superblock.main_fat);
         pwrite(file_des, &temp, 2, (255 * BLOCK_SIZE) + i);//main FAT loc
 	i+=2;
@@ -605,23 +631,31 @@ static int unmount_memefs(){
         pwrite(file_des, &main_superblock.volume_label, 16, (255 * BLOCK_SIZE) + i); //volume label
 	i+=16;
         //unused
-
+	for(int j = 0; j < 448; j++){
+		temp = 0;
+		pwrite(file_des, &temp, 1, (255 * BLOCK_SIZE) + i);
+		i++;
+	}
 	//Backup Superblock
 	i = 0;
 	pwrite(file_des, &backup_superblock.signature, 16, (0 * BLOCK_SIZE) + i); //writing the same signature to backup superblock
 	i+=16;
-	temp = htons(backup_superblock.cleanly_unmounted);
+	temp = backup_superblock.cleanly_unmounted;
         pwrite(file_des, &temp, 1, (0 * BLOCK_SIZE) + i); //mounted flag
 	i++;
-	i+=3; //reserved
+	for(int j = 0; j < 3; j++){
+		temp = 0;
+		pwrite(file_des, &temp, 1, (0 * BLOCK_SIZE) + i);
+		i++;
+	}
 	big_temp = htonl(backup_superblock.fs_version);
 	pwrite(file_des, &big_temp, 4, (0 * BLOCK_SIZE) + i); //version
 	i+=4;
 	for(int j = 0; j < 8; j++){
 		temp = backup_superblock.fs_ctime[j];
-        	pwrite(file_des, &temp, 1, (0 * BLOCK_SIZE) + i + j);//BCD
+        	pwrite(file_des, &temp, 1, (0 * BLOCK_SIZE) + i);//BCD
+		i++;
 	}
-	i+=8;
 	temp = htons(backup_superblock.main_fat);
         pwrite(file_des, &temp, 2, (0 * BLOCK_SIZE) + i);//main FAT loc
 	i+=2;
@@ -649,6 +683,11 @@ static int unmount_memefs(){
         pwrite(file_des, &backup_superblock.volume_label, 16, (0 * BLOCK_SIZE) + i); //volume label
 	i+=16;
         //unused
+	for(int j = 0; j < 448; j++){
+		temp = 0;
+		pwrite(file_des, &temp, 1, (0 * BLOCK_SIZE) + i);
+		i++;
+	}
 	//FAT
 	i = 0;
 	for(int j = 0; j < 256; j++){
@@ -674,12 +713,14 @@ static int unmount_memefs(){
 		i+=2;
 		pwrite(file_des, &directory_blocks[j].filename, 11, (240 * BLOCK_SIZE) + i);
 		i+=11;
+		temp = 0;
+		pwrite(file_des, &temp, 1, (240 * BLOCK_SIZE) + i);
 		i++; // unused
 		for(int k = 0; k < 8; k++){
 			temp = directory_blocks[j].timestamp[k];
-			pwrite(file_des, &temp, 1, (240 * BLOCK_SIZE) + i + k);
+			pwrite(file_des, &temp, 1, (240 * BLOCK_SIZE) + i);
+			i++;
 		}
-		i+=8;
 		big_temp = htonl(directory_blocks[j].size);
 		pwrite(file_des, &big_temp, 4, (240 * BLOCK_SIZE) + i);
 		i+=4;
@@ -691,12 +732,21 @@ static int unmount_memefs(){
 		i+=2;
 	}
 	//Reserved Blocks
-
-	//User Data Blocks
-	for(int j = 0; j < 220 * BLOCK_SIZE; j++){
-		pwrite(file_des, &user_blocks[j], 1, (19 * BLOCK_SIZE) + j);
+	i = 0;
+	for(int j = 0; j < 18 * BLOCK_SIZE; j++){
+		temp = 0;
+		pwrite(file_des, &temp, 1, (1 * BLOCK_SIZE) + i);
+		i++;
 	}
+	//User Data Blocks
+	i = 0;
+	for(int j = 0; j < 220 * BLOCK_SIZE; j++){
+		pwrite(file_des, &user_blocks[j], 1, (19 * BLOCK_SIZE) + i);
+		i++;
+	}
+	fsync(file_des);
 	fclose(filesystem);
+	free(abs_path);
 	printf("End of unmount\n");
 	return 0;
 }

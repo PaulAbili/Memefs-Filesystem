@@ -1,5 +1,5 @@
 
-# Project 4: MEMEfs — A Custom FUSE Filesystem
+# MEMEfs — A Custom FUSE Filesystem
 
 The MEMEfs Project was designed to simulate a filesystem. Within this project it supports common filesystem operations, read, write, readdir, getattr and a few others. This project was designed to give students experience with file system operations and secondary memory.
 

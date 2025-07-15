@@ -1,15 +1,10 @@
-
 # MEMEfs — A Custom FUSE Filesystem
 
 The MEMEfs Project was designed to simulate a filesystem. Within this project it supports common filesystem operations, read, write, readdir, getattr and a few others. This project was designed to give students experience with file system operations and secondary memory.
 
-**** I made a small modification to mkmemefs (I really didn’t like how the signature didn’t end in a null terminator so I removed one of the ‘+’s so it now looks like "?MEMEFS+CMSC421\0" instead of "?MEMEFS++CMSC421"
-
 Finally updates will only appear on myfilesystem.img AFTER unmounting
 
 ## How to Build?
-You've been provided a Makefile. If you need to change something, please document it here. Otherwise read the following instructions.
-
 The following will run you through how to compile and fuse setup + Build Project Explained:
 
 ```bash
@@ -109,7 +104,8 @@ Given in project doc
 Print_bcd_timestamp
 Given in project doc
 
-# References
+### References
+
 https://developer.ibm.com/articles/l-fuse/
 https://libfuse.github.io/doxygen/fuse_8h_source.html
 https://libfuse.github.io/doxygen/structfuse__file__info.html
@@ -124,6 +120,7 @@ https://pubs.opengroup.org/onlinepubs/7908799/xsh/sysstat.h.html
 
 https://linux.die.net/man/3/htons
 
-## Authors
+### Contact
 
-- [@SmilingSupernova]
+**Author:** Paul Abili <br>
+**Email:** pabili1@umbc.edu <br>
